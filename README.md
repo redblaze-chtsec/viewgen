@@ -57,6 +57,8 @@ options:
   -e, --encrypted       ViewState is encrypted
   -f FILE, --file FILE  read ViewState payload from file
   --version             show viewgen version
+  --path PATH           target web page(only for .NET >= 4.5)
+  --apppath APPPATH     application path(only for .NET >= 4.5)
 ```
 
 ---------------
@@ -73,6 +75,12 @@ $ viewgen --decode --check --webconfig web.config --modifier CA0B0334 "zUylqfbpW
 
 $ viewgen --webconfig web.config --modifier CA0B0334 "/wEPDwUKMTYyODkyNTEzMw9kFgICAw8WAh4HZW5jdHlwZQUTbXVsdGlwYXJ0L2Zvcm0tZGF0YWRk"
 r4zCP5CdSo5R9XmiEXvp1LHVzX1uICmY7oW2WD/gKS/Mt/s+NKXrMpScr4Gvrji7lFdHPOttFpi2x7YbmQjEjJ2NdBMuzeKFzIuno2DenYF8yVVKx5+LL7LYmI0CVcNQ+jH8VxvzVG58NQIJ/rSr6NqNMBahrVfAyVPgdL4Eke3Bq4XWk6BYW2Bht6ykSHF9szT8tG6KUKwf+T94hFUFNIXXkURptwQJEC/5AMkFXMU0VXDa
+
+$ viewgen --check -e --vkey '6F16768FDF1E1E4A23CE58625C761F55FD13A1681F7AE3BDB4BB8F99874C7485' --dkey 'F42E58ECE66428868A69ED1F5B6721364A3FC3C490C7FFAAE1EAE96BBA45C88D' "EZgmsZEuppW0eZTumHR9toJTc4MDPJ0CzjIVt6u3FO8TQLDiFbGqvHwKAz72nGrhrCZP3rYE1uXqeU160jZo7xY1v48MACMKLrPiljD3yaM=" --dalg AES --valg SHA256 --decode --path '/default.aspx' --apppath '/'
+[+] ViewState
+(('91245346', None), None)
+[+] Signature: ac264fdeb604d6e5ea794d7ad23668ef1635bf8f0c00230a2eb3e29630f7c9a3
+[+] Signature match
 
 $ viewgen --guess "/wEPDwUKMTYyODkyNTEzMw9kFgICAw8WAh4HZW5jdHlwZQUTbXVsdGlwYXJ0L2Zvcm0tZGF0YWRkuVmqYhhtcnJl6Nfet5ERqNHMADI="
 [+] ViewState is not encrypted
