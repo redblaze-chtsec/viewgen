@@ -24,7 +24,8 @@ $ viewgen -h
 usage: viewgen [-h] [--webconfig WEBCONFIG] [-m MODIFIER]
                [--viewstateuserkey VIEWSTATEUSERKEY] [-c COMMAND] [--decode]
                [--guess] [--check] [--vkey VKEY] [--valg VALG] [--dkey DKEY]
-               [--dalg DALG] [-u] [-e] [-f FILE] [--version]
+               [--dalg DALG] [-u] [-e] [-f FILE] [--version] [--path PATH]
+               [--apppath APPPATH]
                [payload]
 
 viewgen is a ViewState tool capable of generating both signed and encrypted

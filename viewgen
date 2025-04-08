@@ -137,9 +137,7 @@ class ViewGen:
 			enc = data[AES.block_size:-hash_size]
 			cipher = AES.new(self.dec_key, AES.MODE_CBC, iv)
 			block_size = AES.block_size
-			random_bytes_size = 0
-			if not self.path and not self.apppath:
-				random_bytes_size = len(self.dec_key) - AES.block_size
+			random_bytes_size = len(self.dec_key) - AES.block_size
 		elif self.dec_alg == "DES":
 			iv = data[0:DES.block_size]
 			enc = data[DES.block_size:-hash_size]
@@ -151,7 +149,7 @@ class ViewGen:
 			enc = data[DES3.block_size:-hash_size]
 			cipher = DES3.new(self.dec_key[:24], DES3.MODE_CBC, iv)
 			block_size = DES3.block_size
-			random_bytes_size = 0
+			random_bytes_size = len(self.dec_key) - DES3.block_size
 		else:
 			return None
 
@@ -447,7 +445,7 @@ def remove_slash_from_path_if_needed(path: str) -> str:
 	if length <= 1 or path[-1] != '/':
 		return path
 
-	return path[:-1]
+	return path[:-1].upper()
 
 
 if __name__ == "__main__":
